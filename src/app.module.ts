@@ -11,28 +11,22 @@ import { diskStorage } from 'multer';
 
 // Configuration imports
 import databaseConfig from './config/database.config';
-import kafkaConfig from './config/kafka.config';
-import jwtConfig from './config/jwt.config';
-import websocketConfig from './config/websocket.config';
 
 // Module imports
 import { AuthModule } from './auth/auth.module';
-import { NotificationsModule } from './notifications/notifications.module';
-import { SocialModule } from './social/social.module';
-import { ChatModule } from './chat/chat.module';
-import { IntegrationModule } from './integration/integration.module';
 import { AdminModule } from './admin/admin.module';
 
 // Shared imports
 import { DatabaseModule } from './database/database.module';
 import { ServeStaticModule } from '@nestjs/serve-static';
+import jwtConfig from './config/jwt.config';
 
 @Module({
   imports: [
     // Configuration
     ConfigModule.forRoot({
       isGlobal: true,
-      load: [databaseConfig, kafkaConfig, jwtConfig, websocketConfig],
+      load: [databaseConfig,jwtConfig ],
       envFilePath: ['.env.local', '.env'],
     }),
 
@@ -118,10 +112,6 @@ import { ServeStaticModule } from '@nestjs/serve-static';
     // Application modules
     DatabaseModule,
     AuthModule,
-    NotificationsModule,
-    SocialModule,
-    ChatModule,
-    IntegrationModule,
     AdminModule,
   ],
   controllers: [],

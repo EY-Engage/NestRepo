@@ -5,30 +5,24 @@ import { Post } from './entities/post.entity';
 import { Comment } from './entities/comment.entity';
 import { Reaction } from './entities/reaction.entity';
 import { PostView } from './entities/post-view.entity';
-import { Follow } from '../follows/entities/follow.entity';
-
-import { NotificationsService } from '../../notifications/notifications.service';
-import { KafkaProducerService } from '../../notifications/kafka/producer.service';
-import { IntegrationService } from '../../integration/integration.service';
-import { KAFKA_TOPICS } from '../../config/kafka.config';
 
 import { IUser } from '../../shared/interfaces/user.interface';
 import { ContentType } from 'src/shared/enums/content-type.enum';
-import { NotificationType } from 'src/shared/enums/notification-type.enum';
+
 import { ReactionType } from 'src/shared/enums/reaction-type.enum';
 import { Role } from 'src/shared/enums/role.enum';
-import { FeedQueryDto, FeedResponseDto } from '../dto/feed.dto';
-import { SearchQueryDto, SearchResultDto } from '../dto/search.dto';
-import { TrendingDto } from '../dto/trending.dto';
 import { CommentDto } from './dto/comment.dto';
 import { CreateCommentDto, UpdateCommentDto } from './dto/create-comment.dto';
 import { CreatePostDto, UpdatePostDto, SharePostDto } from './dto/create-post.dto';
 import { PostDto } from './dto/post.dto';
 import { CreateReactionDto } from './dto/reaction.dto';
 import { User } from './entities/user.entity';
-import { FlagContentDto } from '../dto/moderation.dto';
 import { Bookmark } from './entities/bookmark.entity';
 import { Flag, FlagStatus } from './entities/flag.entity';
+import { FeedQueryDto, FeedResponseDto } from '../dto/feed.dto';
+import { FlagContentDto } from '../dto/moderation.dto';
+import { SearchQueryDto, SearchResultDto } from '../dto/search.dto';
+import { TrendingDto } from '../dto/trending.dto';
 
 @Injectable()
 export class PostsService {
@@ -45,13 +39,8 @@ export class PostsService {
     private flagRepository: Repository<Flag>,
     @InjectRepository(PostView)
     private postViewRepository: Repository<PostView>,
-    @InjectRepository(Follow)
-    private followRepository: Repository<Follow>,
     @InjectRepository(Bookmark)
     private bookmarkRepository: Repository<Bookmark>,
-    private notificationsService: NotificationsService,
-    private kafkaProducer: KafkaProducerService,
-    private integrationService: IntegrationService,
   ) {}
 
   // SIGNALEMENT AVEC GESTION COMPLÈTE - VERSION CORRIGÉE
@@ -189,26 +178,6 @@ export class PostsService {
         }
       }
 
-      try {
-        await this.kafkaProducer.publish('CONTENT_FLAGGED', {
-          flagId: savedFlag.id,
-          targetId: dto.targetId,
-          targetType: dto.targetType,
-          reason: dto.reason,
-          reportCount,
-          isUrgent,
-          reportedBy: {
-            id: user.id,
-            name: user.fullName,
-            department: user.department,
-          },
-          contentAuthor: contentAuthor,
-          timestamp: new Date(),
-        });
-      } catch (kafkaError) {
-        console.warn('Erreur publication Kafka signalement:', kafkaError);
-      }
-
       console.log('Signalement créé:', {
         flagId: savedFlag.id,
         targetId: dto.targetId,
@@ -302,43 +271,6 @@ export class PostsService {
     }
 
     const savedPost = await this.postRepository.save(post);
-
-    try {
-      await this.kafkaProducer.publish(KAFKA_TOPICS.POST_CREATED, {
-        id: savedPost.id,
-        authorId: savedPost.authorId,
-        authorName: savedPost.authorName,
-        authorDepartment: savedPost.authorDepartment,
-        content: savedPost.content.substring(0, 200),
-        isPublic: savedPost.isPublic,
-        departmentOnly: savedPost.departmentOnly,
-        mentions: savedPost.mentions,
-        timestamp: new Date(),
-      });
-    } catch (error) {
-      console.warn('Erreur publication Kafka:', error);
-    }
-
-    if (mentions.length > 0) {
-      await this.notifyMentionedUsers(savedPost, mentions, user);
-    }
-
-    try {
-      await this.integrationService.notifyDotNetOfSocialActivity({
-        userId: user.id,
-        activityType: 'POST_CREATED',
-        targetId: savedPost.id,
-        details: {
-          postId: savedPost.id,
-          content: savedPost.content.substring(0, 100),
-          isPublic: savedPost.isPublic,
-          departmentOnly: savedPost.departmentOnly,
-        },
-      });
-    } catch (error) {
-      console.warn('Erreur notification .NET:', error);
-    }
-
     return this.mapToDto(savedPost, user);
   }
 
@@ -445,44 +377,6 @@ export class PostsService {
         'repliesCount',
         1
       );
-    }
-
-    try {
-      await this.kafkaProducer.publish(KAFKA_TOPICS.POST_COMMENTED, {
-        id: savedComment.id,
-        postId: post.id,
-        postAuthorId: post.authorId,
-        authorId: savedComment.authorId,
-        authorName: savedComment.authorName,
-        content: savedComment.content.substring(0, 200),
-        mentions: savedComment.mentions,
-        timestamp: new Date(),
-      });
-
-      if (post.authorId !== user.id) {
-        await this.notificationsService.createNotification({
-          type: NotificationType.POST_COMMENTED,
-          title: 'Nouveau commentaire',
-          content: `${user.fullName} a commenté votre publication.`,
-          userId: post.authorId,
-          senderId: user.id,
-          senderName: user.fullName,
-          targetId: post.id,
-          targetType: 'post',
-          actionUrl: `/social/posts/${post.id}#comment-${savedComment.id}`,
-          data: {
-            postId: post.id,
-            commentId: savedComment.id,
-            commentContent: savedComment.content.substring(0, 100),
-          },
-        });
-      }
-    } catch (error) {
-      console.warn('Erreur notifications:', error);
-    }
-
-    if (mentions.length > 0) {
-      await this.notifyMentionedUsersInComment(savedComment, mentions, user);
     }
 
     return this.mapCommentToDto(savedComment, user);
@@ -604,6 +498,7 @@ export class PostsService {
       
       throw new InternalServerErrorException('Failed to toggle reaction');
     }
+    
   }
 
   async getPostReactions(postId: string, reactionType?: ReactionType): Promise<any[]> {
@@ -1191,45 +1086,6 @@ export class PostsService {
     }
   }
 
-  private async notifyContentAuthor(target: any, user: IUser, reactionType: ReactionType) {
-    if (target.authorId === user.id) return;
-
-    const isPost = target.hasOwnProperty('allowComments');
-    const notificationType = isPost ? NotificationType.POST_LIKED : NotificationType.POST_COMMENTED;
-    const content = isPost 
-      ? `${user.fullName} a aimé votre publication` 
-      : `${user.fullName} a aimé votre commentaire`;
-
-    try {
-      await this.notificationsService.createNotification({
-        type: notificationType,
-        title: 'Nouvelle réaction',
-        content,
-        userId: target.authorId,
-        senderId: user.id,
-        senderName: user.fullName,
-        targetId: isPost ? target.id : target.postId,
-        targetType: isPost ? 'post' : 'comment',
-        actionUrl: isPost ? `/social/posts/${target.id}` : `/social/posts/${target.postId}#comment-${target.id}`,
-        data: {
-          reactionType,
-          targetId: target.id,
-          targetType: isPost ? 'post' : 'comment',
-        },
-      });
-    } catch (error) {
-      console.warn('Erreur notification:', error);
-    }
-  }
-
-  private async notifyMentionedUsers(post: Post, mentions: string[], author: IUser) {
-    console.log('Mentions à traiter:', mentions);
-  }
-
-  private async notifyMentionedUsersInComment(comment: Comment, mentions: string[], author: IUser) {
-    console.log('Mentions dans commentaire à traiter:', mentions);
-  }
-
   private async recordPostView(postId: string, user: IUser) {
     const existingView = await this.postViewRepository.findOne({
       where: { postId, userId: user.id },
@@ -1253,14 +1109,6 @@ export class PostsService {
         userId: user.id, 
         targetId: post.id, 
         targetType: ContentType.POST 
-      },
-    });
-
-    const isFollowing = await this.followRepository.findOne({
-      where: { 
-        followerId: user.id, 
-        followedId: post.authorId, 
-        isActive: true 
       },
     });
 
@@ -1292,7 +1140,6 @@ export class PostsService {
       updatedAt: post.updatedAt,
       isLiked: !!userReaction,
       userReaction: userReaction?.type,
-      isFollowingAuthor: !!isFollowing,
       canEdit: post.authorId === user.id,
       canDelete: post.authorId === user.id || this.canModerateContent(user),
       canFlag: post.authorId !== user.id,

@@ -10,10 +10,8 @@ import { Department } from 'src/shared/enums/department.enum';
 import { Role } from 'src/shared/enums/role.enum';
 
 import { ContentType } from 'src/shared/enums/content-type.enum';
-import { KafkaProducerService } from 'src/notifications/kafka/producer.service';
-import { NotificationsService } from 'src/notifications/notifications.service';
 import { IUser } from 'src/shared/interfaces/user.interface';
-import { FlagStatsQueryDto, FlaggedContentQueryDto, UserSearchQueryDto, ContentSearchQueryDto, ModerationActionDto } from './dto/admin.dto';
+import { FlagStatsQueryDto, FlaggedContentQueryDto, UserSearchQueryDto } from './dto/admin.dto';
 import { ModerationHistory } from './entities/moderation-history.entity';
 import { UserWarning } from './entities/user-warning.entity';
 
@@ -32,8 +30,6 @@ export class AdminService {
     private readonly moderationHistoryRepository: Repository<ModerationHistory>,
     @InjectRepository(UserWarning)
     private readonly userWarningRepository: Repository<UserWarning>,
-    private readonly notificationsService: NotificationsService,
-    private readonly kafkaProducer: KafkaProducerService,
   ) {}
 
   // Vérifier les permissions d'administration

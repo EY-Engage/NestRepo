@@ -11,26 +11,6 @@ import { join } from 'path';
 import * as express from 'express';
 import { existsSync, mkdirSync } from 'fs';
 
-// Custom WebSocket Adapter pour supporter Redis si nécessaire
-class CustomIoAdapter extends IoAdapter {
-  createIOServer(port: number, options?: any): any {
-    const server = super.createIOServer(port, {
-      ...options,
-      cors: {
-        origin: process.env.WS_CORS_ORIGIN || 'http://localhost:3000',
-        credentials: true,
-        methods: ['GET','HEAD','PUT','PATCH','POST','DELETE','OPTIONS'],
-      },
-      transports: ['websocket', 'polling'],
-      allowEIO3: true,
-      pingTimeout: 60000,
-      pingInterval: 25000,
-    });
-
-    return server;
-  }
-}
-
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
 
@@ -72,7 +52,7 @@ async function bootstrap() {
 
     // CORRECTION 2: Configuration correcte pour servir les fichiers statiques
     // Utiliser le chemin absolu et ajouter des options CORS pour les fichiers
-    app.use('/uploads', (req, res, next) => {
+    app.use('/uploads', ( res, next) => {
       // Ajouter les headers CORS pour les fichiers statiques
       res.header('Access-Control-Allow-Origin', '*');
       res.header('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
@@ -128,9 +108,6 @@ async function bootstrap() {
       }),
     );
 
-    // WebSocket adapter
-    app.useWebSocketAdapter(new CustomIoAdapter(app));
-
     // API prefix
     app.setGlobalPrefix('api', {
       exclude: ['/health', '/', '/uploads'],
@@ -159,10 +136,7 @@ async function bootstrap() {
           description: 'JWT session cookie',
         })
         .addTag('Authentication', 'Endpoints de validation de token')
-        .addTag('Notifications', 'Système de notifications')
         .addTag('Social', 'Réseau social (posts, réactions, commentaires)')
-        .addTag('Chat', 'Messagerie instantanée')
-        .addTag('Integration', 'Intégration avec .NET Core')
         .addTag('Admin', 'Administration et modération')
         .build();
 
@@ -186,8 +160,6 @@ async function bootstrap() {
         version: process.env.npm_package_version || '1.0.0',
         services: {
           database: 'unknown',
-          kafka: 'unknown',
-          websockets: 'active',
           uploads: existsSync(uploadsPath) ? 'available' : 'unavailable',
         },
       };
@@ -196,7 +168,6 @@ async function bootstrap() {
       try {
         // Ici vous pouvez ajouter des checks simples
         healthStatus.services.database = 'connected';
-        healthStatus.services.kafka = 'connected';
       } catch (error) {
         logger.warn('Some services may be unavailable:', error.message);
       }
@@ -214,10 +185,6 @@ async function bootstrap() {
         documentation: nodeEnv === 'development' ? `/api/docs` : undefined,
         health: '/health',
         uploads: `/uploads`,
-        kafka: {
-          enabled: !!process.env.KAFKA_BROKERS,
-          brokers: process.env.KAFKA_BROKERS || 'not configured',
-        },
       });
     });
 
@@ -255,24 +222,10 @@ async function bootstrap() {
 
     logger.log(`🚀 Application is running on: http://localhost:${port}`);
     logger.log(`🌍 Environment: ${nodeEnv}`);
-    logger.log(`💬 WebSocket server is running on: ws://localhost:${port}`);
     
     if (nodeEnv === 'development') {
       logger.log(`🔧 API Documentation: http://localhost:${port}/api/docs`);
       logger.log(`⚡ Hot reload is enabled`);
-      
-      // Affichage des informations Kafka
-      const kafkaBrokers = process.env.KAFKA_BROKERS || 'localhost:9092';
-      logger.log(`📨 Kafka brokers: ${kafkaBrokers}`);
-    }
-
-    // Avertissement si Kafka n'est pas disponible
-    if (nodeEnv === 'development') {
-      setTimeout(() => {
-        logger.log('💡 Tip: If Kafka is not running, start it with:');
-        logger.log('   1. Start Zookeeper: bin\\windows\\zookeeper-server-start.bat config\\zookeeper.properties');
-        logger.log('   2. Start Kafka: bin\\windows\\kafka-server-start.bat config\\server.properties');
-      }, 2000);
     }
 
   } catch (error) {

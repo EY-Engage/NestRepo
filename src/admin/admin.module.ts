@@ -13,12 +13,11 @@ import { User } from 'src/social/posts/entities/user.entity';
 import { ModerationHistory } from './entities/moderation-history.entity';
 import { UserWarning } from './entities/user-warning.entity';
 import { Comment } from 'src/social/posts/entities/comment.entity';
-import { NotificationsModule } from 'src/notifications/notifications.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Post, Flag,Comment,Reaction,User,Bookmark,ModerationHistory,UserWarning]),
-    PostsModule,JwtModule ,NotificationsModule
+    PostsModule,JwtModule 
   ],
   controllers: [AdminController],
   providers: [AdminService],

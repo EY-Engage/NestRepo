@@ -1,5 +1,4 @@
 import { IsOptional, IsEnum, IsBoolean, IsString, IsArray, IsIn } from "class-validator";
-import { Department } from "src/shared/enums/department.enum";
 import { Transform } from "class-transformer";
 import { PostDto } from "../posts/dto/post.dto";
 

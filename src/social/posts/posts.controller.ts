@@ -26,9 +26,6 @@ import { v4 as uuidv4 } from 'uuid';
 
 import { IUser } from '../../shared/interfaces/user.interface';
 import { Role } from 'src/shared/enums/role.enum';
-import { FeedQueryDto } from '../dto/feed.dto';
-import { FlagContentDto } from '../dto/moderation.dto';
-import { SearchQueryDto } from '../dto/search.dto';
 import { CreateCommentDto, UpdateCommentDto } from './dto/create-comment.dto';
 import { CreatePostDto, UpdatePostDto, SharePostDto } from './dto/create-post.dto';
 import { CreateReactionDto } from './dto/reaction.dto';
@@ -36,6 +33,9 @@ import { ReactionType } from 'src/shared/enums/reaction-type.enum';
 import { diskStorage } from 'multer';
 import { extname } from 'path';
 import { CurrentUser } from 'src/shared/decorators/user.decorator';
+import { FeedQueryDto } from '../dto/feed.dto';
+import { FlagContentDto } from '../dto/moderation.dto';
+import { SearchQueryDto } from '../dto/search.dto';
 
 @Controller('social/posts')
 @UseGuards(JwtAuthGuard)

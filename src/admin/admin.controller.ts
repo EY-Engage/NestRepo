@@ -1,5 +1,5 @@
-// admin.controller.ts - Contrôleur principal corrigé et enrichi
-import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards, ParseUUIDPipe } from '@nestjs/common';
+
+import { Controller, Get, Post, Put, Body, Param, Query, UseGuards, ParseUUIDPipe } from '@nestjs/common';
 import { AdminService } from './admin.service';
 
 import { Role } from 'src/shared/enums/role.enum';
@@ -7,7 +7,7 @@ import { Roles } from 'src/shared/decorators/roles.decorator';
 import { JwtAuthGuard } from 'src/shared/guards/jwt-auth.guard';
 import { RolesGuard } from 'src/shared/guards/roles.guard';
 import { IUser } from 'src/shared/interfaces/user.interface';
-import { FlagStatsQueryDto, ModerationActionDto, UserSearchQueryDto, ContentSearchQueryDto, FlaggedContentQueryDto } from './dto/admin.dto';
+import { FlagStatsQueryDto, UserSearchQueryDto, FlaggedContentQueryDto } from './dto/admin.dto';
 import { CurrentUser } from 'src/shared/decorators/user.decorator';
 import { Department } from 'src/shared/enums/department.enum';
 import { Flag, FlagStatus } from 'src/social/posts/entities/flag.entity';
@@ -15,7 +15,7 @@ import { ContentType } from 'src/shared/enums/content-type.enum';
 
 @Controller('admin')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.AGENT_EY)
+@Roles(Role.ADMIN, Role.AGENT_EY)
 export class AdminController {
   constructor(private readonly adminService: AdminService) {}
 
@@ -373,31 +373,5 @@ export class AdminController {
       limit,
       message: 'Journal d\'audit vide' 
     };
-  }
-
-  // ================== NOTIFICATIONS ==================
-
-  @Get('notifications')
-  async getAdminNotifications(@CurrentUser() user: IUser) {
-    return {
-      notifications: [
-        {
-          id: 'notif-1',
-          type: 'urgent_flag',
-          title: 'Nouveaux signalements urgents',
-          message: 'Plusieurs signalements nécessitent une attention immédiate',
-          createdAt: new Date(),
-          read: false
-        }
-      ]
-    };
-  }
-
-  @Put('notifications/:id/read')
-  async markNotificationAsRead(
-    @CurrentUser() user: IUser,
-    @Param('id') notificationId: string
-  ) {
-    return { success: true, message: 'Notification marquée comme lue' };
   }
 }

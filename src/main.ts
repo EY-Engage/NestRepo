@@ -13,30 +13,34 @@ import { existsSync, mkdirSync } from 'fs';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
+  let nodeEnv = 'development';
 
   try {
     const app = await NestFactory.create(AppModule, {
-      logger: ['error', 'warn', 'log', 'debug', 'verbose'],
+      logger: ['error', 'warn', 'log', 'debug'],
     });
 
     const configService = app.get(ConfigService);
     const port = configService.get<number>('PORT') || 3001;
-    const nodeEnv = configService.get<string>('NODE_ENV') || 'development';
+    nodeEnv = configService.get<string>('NODE_ENV') || 'development';
 
-    // CORRECTION 1: S'assurer que le dossier uploads existe
+    // WebSocket adapter pour les notifications
+    app.useWebSocketAdapter(new IoAdapter(app));
+
+    // Créer le dossier uploads s'il n'existe pas
     const uploadsPath = join(process.cwd(), 'uploads');
     if (!existsSync(uploadsPath)) {
       mkdirSync(uploadsPath, { recursive: true });
-      logger.log(`📁 Created uploads directory: ${uploadsPath}`);
+      logger.log(`Created uploads directory: ${uploadsPath}`);
     }
 
-    // Security - Configuration allégée pour le développement
+    // Security middleware
     if (nodeEnv === 'production') {
       app.use(helmet({
         crossOriginEmbedderPolicy: false,
         contentSecurityPolicy: {
           directives: {
-            imgSrc: ["'self'", 'data:', 'https:'],
+            imgSrc: ["'self'", 'data:', 'https:', 'http:'],
             scriptSrc: ["'self'"],
             styleSrc: ["'self'", "'unsafe-inline'"],
           },
@@ -44,23 +48,19 @@ async function bootstrap() {
       }));
     }
 
-    // Compression
+    // Compression et cookies
     app.use(compression());
-
-    // Cookie parser
     app.use(cookieParser());
 
-    // CORRECTION 2: Configuration correcte pour servir les fichiers statiques
-    // Utiliser le chemin absolu et ajouter des options CORS pour les fichiers
-    app.use('/uploads', ( res, next) => {
-      // Ajouter les headers CORS pour les fichiers statiques
+    // CORRECTION CRITIQUE: Middleware pour fichiers statiques avec syntaxe correcte
+    app.use('/uploads', (req, res, next) => {
+      // Headers CORS pour les fichiers statiques
       res.header('Access-Control-Allow-Origin', '*');
       res.header('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
       res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
       next();
     }, express.static(uploadsPath, {
-      // Options pour le serveur de fichiers statiques
-      maxAge: '1d', // Cache pendant 1 jour
+      maxAge: '1d',
       etag: true,
       lastModified: true,
       setHeaders: (res, path, stat) => {
@@ -68,19 +68,23 @@ async function bootstrap() {
         if (path.endsWith('.pdf')) {
           res.set('Content-Type', 'application/pdf');
         } else if (path.match(/\.(jpg|jpeg|png|gif|webp)$/i)) {
-          res.set('Content-Type', `image/${path.split('.').pop()}`);
+          const extension = path.split('.').pop()?.toLowerCase();
+          if (extension === 'jpg') {
+            res.set('Content-Type', 'image/jpeg');
+          } else {
+            res.set('Content-Type', `image/${extension}`);
+          }
         }
       }
     }));
 
-    // CORRECTION 3: Log du chemin des uploads pour debugging
-    logger.log(`📂 Static files served from: ${uploadsPath}`);
-    logger.log(`🔗 Files accessible at: http://localhost:${port}/uploads/`);
+    logger.log(`Static files served from: ${uploadsPath}`);
+    logger.log(`Files accessible at: http://localhost:${port}/uploads/`);
 
-    // CORS - Plus permissif en développement
+    // CORS configuration
     const corsOrigins = nodeEnv === 'development' 
-      ? ['http://localhost:3000', 'http://localhost:3001', 'http://127.0.0.1:3000']
-      : [process.env.FRONTEND_URL || 'http://localhost:3000'];
+      ? ['http://localhost:3000', 'http://localhost:3001', 'http://127.0.0.1:3000', 'http://127.0.0.1:3001']
+      : [configService.get<string>('FRONTEND_URL') || 'http://localhost:3000'];
 
     app.enableCors({
       origin: corsOrigins,
@@ -93,18 +97,20 @@ async function bootstrap() {
         'Accept',
         'Authorization',
         'X-API-Key',
+        'x-api-key',
       ],
     });
 
-    // Global pipes
+    // Global validation pipe
     app.useGlobalPipes(
       new ValidationPipe({
         whitelist: true,
-        forbidNonWhitelisted: false, // Plus tolérant en dev
+        forbidNonWhitelisted: false,
         transform: true,
         transformOptions: {
           enableImplicitConversion: true,
         },
+        disableErrorMessages: nodeEnv === 'production',
       }),
     );
 
@@ -113,11 +119,11 @@ async function bootstrap() {
       exclude: ['/health', '/', '/uploads'],
     });
 
-    // Swagger documentation - Toujours activé en développement
+    // Swagger documentation
     if (nodeEnv === 'development') {
       const config = new DocumentBuilder()
-        .setTitle('EY Engage Social & Notifications API')
-        .setDescription('API pour le réseau social et système de notifications EY Engage')
+        .setTitle('EY Engage API')
+        .setDescription('API pour EY Engage - Social, Events, Notifications')
         .setVersion('1.0')
         .addBearerAuth(
           {
@@ -135,8 +141,19 @@ async function bootstrap() {
           name: 'ey-session',
           description: 'JWT session cookie',
         })
+        .addApiKey(
+          {
+            type: 'apiKey',
+            name: 'x-api-key',
+            in: 'header',
+            description: 'API key for internal services',
+          },
+          'api-key',
+        )
         .addTag('Authentication', 'Endpoints de validation de token')
         .addTag('Social', 'Réseau social (posts, réactions, commentaires)')
+        .addTag('Notifications', 'Système de notifications en temps réel')
+        .addTag('Events', 'Gestion des événements')
         .addTag('Admin', 'Administration et modération')
         .build();
 
@@ -144,100 +161,142 @@ async function bootstrap() {
       SwaggerModule.setup('api/docs', app, document, {
         swaggerOptions: {
           persistAuthorization: true,
+          tagsSorter: 'alpha',
+          operationsSorter: 'alpha',
         },
       });
 
-      logger.log(`📚 Swagger documentation available at http://localhost:${port}/api/docs`);
+      logger.log(`Swagger documentation: http://localhost:${port}/api/docs`);
     }
 
-    // Health check avec vérification des services
+    // Health check endpoint
     app.getHttpAdapter().get('/health', async (req, res) => {
       const healthStatus = {
         status: 'OK',
         timestamp: new Date().toISOString(),
-        uptime: process.uptime(),
+        uptime: Math.floor(process.uptime()),
         environment: nodeEnv,
-        version: process.env.npm_package_version || '1.0.0',
+        version: '1.0.0',
         services: {
-          database: 'unknown',
+          api: 'running',
           uploads: existsSync(uploadsPath) ? 'available' : 'unavailable',
+          websocket: 'enabled',
+        },
+        memory: {
+          used: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + ' MB',
+          total: Math.round(process.memoryUsage().heapTotal / 1024 / 1024) + ' MB',
         },
       };
 
-      // Vérification simple des services (sans bloquer si indisponibles)
-      try {
-        // Ici vous pouvez ajouter des checks simples
-        healthStatus.services.database = 'connected';
-      } catch (error) {
-        logger.warn('Some services may be unavailable:', error.message);
-      }
-
-      res.json(healthStatus);
+      res.status(200).json(healthStatus);
     });
 
     // Root endpoint
     app.getHttpAdapter().get('/', (req, res) => {
       res.json({
-        name: 'EY Engage Social & Notifications API',
+        name: 'EY Engage API',
         version: '1.0.0',
         status: 'running',
         environment: nodeEnv,
-        documentation: nodeEnv === 'development' ? `/api/docs` : undefined,
-        health: '/health',
-        uploads: `/uploads`,
+        endpoints: {
+          documentation: nodeEnv === 'development' ? `/api/docs` : undefined,
+          health: '/health',
+          uploads: `/uploads`,
+          api: '/api',
+        },
+        features: [
+          'Social Network',
+          'Real-time Notifications',
+          'Event Management',
+          'File Uploads',
+          'WebSocket Support'
+        ],
       });
     });
 
-    // Gestion des erreurs - Plus tolérant en développement
+    // Gestionnaires d'erreurs globaux
     process.on('unhandledRejection', (reason, promise) => {
-      if (nodeEnv === 'development') {
-        logger.warn('Unhandled Promise Rejection (dev mode):', reason);
-      } else {
-        logger.error('Unhandled Promise Rejection:', reason);
+      logger.error('Unhandled Promise Rejection:', {
+        reason: reason?.toString(),
+        promise: promise?.toString(),
+      });
+      
+      if (nodeEnv === 'production') {
+        // En production, on peut choisir de redémarrer l'application
+        setTimeout(() => process.exit(1), 1000);
       }
     });
 
     process.on('uncaughtException', (error) => {
-      logger.error('Uncaught Exception:', error);
-      if (nodeEnv === 'production') {
-        process.exit(1);
-      }
+      logger.error('Uncaught Exception:', {
+        message: error.message,
+        stack: error.stack,
+      });
+      
+      // Toujours arrêter sur une exception non capturée
+      process.exit(1);
     });
 
     // Graceful shutdown
-    process.on('SIGTERM', async () => {
-      logger.log('SIGTERM received, shutting down gracefully...');
-      await app.close();
-      process.exit(0);
-    });
+    const gracefulShutdown = async (signal: string) => {
+      logger.log(`${signal} received, shutting down gracefully...`);
+      try {
+        await app.close();
+        logger.log('Application closed successfully');
+        process.exit(0);
+      } catch (error) {
+        logger.error('Error during shutdown:', error);
+        process.exit(1);
+      }
+    };
 
-    process.on('SIGINT', async () => {
-      logger.log('SIGINT received, shutting down gracefully...');
-      await app.close();
-      process.exit(0);
-    });
+    process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+    process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
-    // Start the application
+    // Démarrer l'application
     await app.listen(port, '0.0.0.0');
 
-    logger.log(`🚀 Application is running on: http://localhost:${port}`);
+    // Messages de démarrage
+    logger.log(`🚀 Application running on: http://localhost:${port}`);
     logger.log(`🌍 Environment: ${nodeEnv}`);
+    logger.log(`📁 Uploads: http://localhost:${port}/uploads/`);
     
     if (nodeEnv === 'development') {
-      logger.log(`🔧 API Documentation: http://localhost:${port}/api/docs`);
-      logger.log(`⚡ Hot reload is enabled`);
+      logger.log(`📚 API Docs: http://localhost:${port}/api/docs`);
+      logger.log(`💾 Health Check: http://localhost:${port}/health`);
+      logger.log(`🔌 WebSocket: ws://localhost:${port}/notifications`);
+      logger.log(`⚡ Hot reload enabled`);
     }
 
+    // Test de santé initial
+    setTimeout(async () => {
+      try {
+        const response = await fetch(`http://localhost:${port}/health`);
+        const health = await response.json();
+        logger.log(`✅ Health check passed: ${health.status}`);
+      } catch (error) {
+        logger.warn(`⚠️ Health check failed: ${error.message}`);
+      }
+    }, 2000);
+
   } catch (error) {
-    logger.error('❌ Error starting application:', error);
+    logger.error('❌ Failed to start application:', {
+      message: error.message,
+      stack: error.stack,
+    });
     
-    // En développement, on peut continuer même si certains services ne sont pas disponibles
-    if (process.env.NODE_ENV === 'development') {
-      logger.warn('⚠️  Some services may be unavailable, but the application can still run in development mode');
-    } else {
-      process.exit(1);
+    // En développement, essayer de donner plus d'informations
+    if (nodeEnv === 'development') {
+      logger.error('Development mode - detailed error:', error);
     }
+    
+    process.exit(1);
   }
 }
 
-bootstrap();
+// Gérer les erreurs de démarrage
+bootstrap().catch((error) => {
+  const logger = new Logger('Bootstrap');
+  logger.error('Failed to bootstrap application:', error);
+  process.exit(1);
+});

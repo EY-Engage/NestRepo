@@ -12,6 +12,7 @@ import { Comment } from 'src/social/posts/entities/comment.entity';
 import { Reaction } from 'src/social/posts/entities/reaction.entity';
 import { Department } from 'src/shared/enums/department.enum';
 import { Bookmark } from './bookmark.entity';
+import { Role } from 'src/shared/enums/role.enum';
 
 @Entity('users')
 export class User {
@@ -25,7 +26,8 @@ export class User {
   @Column({ unique: true, length: 255 })
   @Index('IDX_USER_EMAIL', { unique: true })
   email: string;
-
+  @Column('simple-array', { default: '' })
+  roles: Role[];
   @Column({ nullable: true, length: 500 })
   profilePicture?: string;
 

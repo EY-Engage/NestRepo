@@ -9,7 +9,7 @@ import { RolesGuard } from 'src/shared/guards/roles.guard';
 import { IUser } from 'src/shared/interfaces/user.interface';
 import { FlagStatsQueryDto, UserSearchQueryDto, FlaggedContentQueryDto } from './dto/admin.dto';
 import { CurrentUser } from 'src/shared/decorators/user.decorator';
-import { Department } from 'src/shared/enums/department.enum';
+import { Department } from '../shared/enums/department.enum';
 import { Flag, FlagStatus } from 'src/social/posts/entities/flag.entity';
 import { ContentType } from 'src/shared/enums/content-type.enum';
 

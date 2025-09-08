@@ -20,6 +20,8 @@ import { AdminModule } from './admin/admin.module';
 import { DatabaseModule } from './database/database.module';
 import { ServeStaticModule } from '@nestjs/serve-static';
 import jwtConfig from './config/jwt.config';
+import { NotificationsModule } from './notifications/notifications.module';
+import { PostsModule } from './social/posts/posts.module';
 
 @Module({
   imports: [
@@ -113,6 +115,8 @@ import jwtConfig from './config/jwt.config';
     DatabaseModule,
     AuthModule,
     AdminModule,
+    NotificationsModule,
+    PostsModule
   ],
   controllers: [],
   providers: [],

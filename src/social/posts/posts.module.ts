@@ -1,28 +1,30 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { PostsController } from './posts.controller';
 import { PostsService } from './posts.service';
+import { PostsController } from './posts.controller';
 import { Post } from './entities/post.entity';
 import { Comment } from './entities/comment.entity';
 import { Reaction } from './entities/reaction.entity';
+import { Flag } from './entities/flag.entity';
 import { PostView } from './entities/post-view.entity';
-import { AuthModule } from 'src/auth/auth.module';
-import { User } from './entities/user.entity';
 import { Bookmark } from './entities/bookmark.entity';
-import { Flag, FlagStatus } from './entities/flag.entity';
+import { User } from './entities/user.entity';
+import { NotificationsModule } from 'src/notifications/notifications.module';
+import { AuthModule } from 'src/auth/auth.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([
-      Post,
-      Comment,
-      Reaction,
-      PostView,
-      User,
+      Post, 
+      Comment, 
+      Reaction, 
+      Flag, 
+      PostView, 
       Bookmark,
-      Flag,
+      User
     ]),
-    AuthModule,
+    forwardRef(() => NotificationsModule),
+    AuthModule 
   ],
   controllers: [PostsController],
   providers: [PostsService],

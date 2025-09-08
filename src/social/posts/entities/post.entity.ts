@@ -1,4 +1,4 @@
-import { Department } from 'src/shared/enums/department.enum';
+import { Department } from '../../../shared/enums/department.enum';
 import {
   Entity,
   PrimaryGeneratedColumn,

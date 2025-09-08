@@ -6,7 +6,7 @@ import { Post } from '../social/posts/entities/post.entity';
 import { Comment } from '../social/posts/entities/comment.entity';
 import { Flag, FlagStatus, FlagAction } from '../social/posts/entities/flag.entity';
 import { User } from '../social/posts/entities/user.entity';
-import { Department } from 'src/shared/enums/department.enum';
+import { Department } from '../shared/enums/department.enum';
 import { Role } from 'src/shared/enums/role.enum';
 
 import { ContentType } from 'src/shared/enums/content-type.enum';

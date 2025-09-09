@@ -1,48 +1,79 @@
-import {
-  Controller,
-  Get,
-  Post,
-  Put,
-  Delete,
-  Body,
-  Param,
-  Query,
-  UseGuards,
-  ParseIntPipe,
-  ParseUUIDPipe,
-  UseInterceptors,
-  UploadedFiles,
-  BadRequestException,
-  ForbiddenException,
-  InternalServerErrorException,
-  NotFoundException,
-} from '@nestjs/common';
-import { FileFieldsInterceptor } from '@nestjs/platform-express';
-import { JwtAuthGuard } from '../../shared/guards/jwt-auth.guard';
-import { RolesGuard } from '../../shared/guards/roles.guard';
-import { Roles } from '../../shared/decorators/roles.decorator';
-import { PostsService } from './posts.service';
+import { Controller, UseGuards, Get, Query, ParseIntPipe, BadRequestException, Post, Body, Param, ParseUUIDPipe, UseInterceptors, UploadedFiles, NotFoundException, ForbiddenException, InternalServerErrorException, Delete, Put } from "@nestjs/common";
+import { FileFieldsInterceptor } from "@nestjs/platform-express";
+import { diskStorage } from "multer";
+import { extname } from "path";
+import { Roles } from "src/shared/decorators/roles.decorator";
+import { CurrentUser } from "src/shared/decorators/user.decorator";
+import { ReactionType } from "src/shared/enums/reaction-type.enum";
+import { Role } from "src/shared/enums/role.enum";
+import { JwtAuthGuard } from "src/shared/guards/jwt-auth.guard";
+import { RolesGuard } from "src/shared/guards/roles.guard";
+import { IUser } from "src/shared/interfaces/user.interface";
+import { FeedQueryDto } from "src/social/dto/feed.dto";
+import { FlagContentDto } from "src/social/dto/moderation.dto";
+import { SearchQueryDto } from "src/social/dto/search.dto";
+import { CreateCommentDto, UpdateCommentDto } from "src/social/posts/dto/create-comment.dto";
+import { CreatePostDto, SharePostDto, UpdatePostDto } from "src/social/posts/dto/create-post.dto";
+import { CreateReactionDto } from "src/social/posts/dto/reaction.dto";
+import { PostsService } from "src/social/posts/posts.service";
 import { v4 as uuidv4 } from 'uuid';
-
-import { IUser } from '../../shared/interfaces/user.interface';
-import { Role } from 'src/shared/enums/role.enum';
-import { CreateCommentDto, UpdateCommentDto } from './dto/create-comment.dto';
-import { CreatePostDto, UpdatePostDto, SharePostDto } from './dto/create-post.dto';
-import { CreateReactionDto } from './dto/reaction.dto';
-import { ReactionType } from 'src/shared/enums/reaction-type.enum';
-import { diskStorage } from 'multer';
-import { extname } from 'path';
-import { CurrentUser } from 'src/shared/decorators/user.decorator';
-import { FeedQueryDto } from '../dto/feed.dto';
-import { FlagContentDto } from '../dto/moderation.dto';
-import { SearchQueryDto } from '../dto/search.dto';
 
 @Controller('social/posts')
 @UseGuards(JwtAuthGuard)
 export class PostsController {
   constructor(private readonly postsService: PostsService) {}
 
-  // GESTION DES POSTS - ROUTES SPÉCIFIQUES EN PREMIER
+  // =============== ROUTES SPÉCIFIQUES EN PREMIER ===============
+
+  // ✅ NOUVEAU: Endpoint pour rechercher les utilisateurs à mentionner
+  @Get('mentions/search')
+  async searchUsersForMentions(
+    @CurrentUser() user: IUser,
+    @Query('q') query: string,
+    @Query('department') department?: string,
+    @Query('limit', new ParseIntPipe({ optional: true })) limit: number = 10,
+  ) {
+    if (!query || query.trim().length < 1) {
+      throw new BadRequestException('La requête de recherche doit contenir au moins 1 caractère');
+    }
+
+    if (limit > 50) {
+      limit = 50; // Limiter à 50 résultats maximum
+    }
+
+    return this.postsService.searchUsersForMentions(user, {
+      query: query.trim(),
+      department,
+      limit,
+    });
+  }
+
+  // ✅ NOUVEAU: Endpoint pour valider les mentions dans un texte
+  @Post('mentions/validate')
+  async validateMentions(
+    @CurrentUser() user: IUser,
+    @Body('content') content: string,
+    @Body('mentions') mentions: string[],
+  ) {
+    if (!content) {
+      throw new BadRequestException('Le contenu est requis pour valider les mentions');
+    }
+
+    return this.postsService.validateMentions(user, content, mentions || []);
+  }
+
+  // ✅ NOUVEAU: Endpoint pour obtenir les détails des utilisateurs mentionnés
+  @Post('mentions/resolve')
+  async resolveMentions(
+    @CurrentUser() user: IUser,
+    @Body('mentions') mentions: string[],
+  ) {
+    if (!mentions || !Array.isArray(mentions)) {
+      throw new BadRequestException('La liste des mentions est requise');
+    }
+
+    return this.postsService.resolveMentions(user, mentions);
+  }
 
   @Get('feed')
   async getFeed(
@@ -232,7 +263,7 @@ export class PostsController {
     };
   }
 
-  // ROUTES POST
+  // =============== ROUTES POST ===============
 
   @Post()
   @UseInterceptors(FileFieldsInterceptor([
@@ -264,7 +295,7 @@ export class PostsController {
         ];
         
         if (!allowedFileTypes.includes(file.mimetype)) {
-          return cb(new Error('Type de fichier non autorisé'), false);
+          return cb(new Error(`Type de fichier non autorisé: ${file.mimetype}`), false);
         }
       }
       
@@ -286,6 +317,21 @@ export class PostsController {
       dto.files = files.files.map(file => file.filename);
     }
 
+    // ✅ CORRECTION: Validation et traitement des mentions avant création
+    if (dto.mentions && dto.mentions.length > 0) {
+      try {
+        const validatedMentions = await this.postsService.validateMentions(user, dto.content, dto.mentions);
+        dto.mentions = validatedMentions.validMentions;
+        
+        if (validatedMentions.invalidMentions.length > 0) {
+          console.warn('Some mentions were invalid:', validatedMentions.invalidMentions);
+        }
+      } catch (mentionError) {
+        console.error('Error validating mentions:', mentionError);
+        // Ne pas faire échouer la création du post pour des erreurs de mentions
+      }
+    }
+
     return this.postsService.createPost(user, dto);
   }
 
@@ -294,6 +340,16 @@ export class PostsController {
     @CurrentUser() user: IUser,
     @Body() dto: SharePostDto,
   ) {
+    // ✅ NOUVEAU: Validation des mentions dans les commentaires de partage
+    if (dto.mentions && dto.mentions.length > 0) {
+      try {
+        const validatedMentions = await this.postsService.validateMentions(user, dto.comment || '', dto.mentions);
+        dto.mentions = validatedMentions.validMentions;
+      } catch (mentionError) {
+        console.error('Error validating share mentions:', mentionError);
+      }
+    }
+
     return this.postsService.sharePost(user, dto);
   }
 
@@ -333,6 +389,16 @@ export class PostsController {
       dto.attachments = files.attachments.map(file => file.filename);
     }
 
+    // ✅ NOUVEAU: Validation des mentions dans les commentaires
+    if (dto.mentions && dto.mentions.length > 0) {
+      try {
+        const validatedMentions = await this.postsService.validateMentions(user, dto.content, dto.mentions);
+        dto.mentions = validatedMentions.validMentions;
+      } catch (mentionError) {
+        console.error('Error validating comment mentions:', mentionError);
+      }
+    }
+
     return this.postsService.createComment(user, dto);
   }
 
@@ -343,42 +409,44 @@ export class PostsController {
   ) {
     return this.postsService.toggleReaction(user, dto);
   }
-@Post('flag')
-@UseGuards(RolesGuard)
-@Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.AGENT_EY, Role.EMPLOYEE_EY)
-async flagContent(
-  @CurrentUser() user: IUser,
-  @Body() dto: FlagContentDto,
-) {
-  try {
-    return await this.postsService.flagContent(user, dto);
-  } catch (error) {
-    if (error instanceof BadRequestException ||
-        error instanceof NotFoundException ||
-        error instanceof ForbiddenException) {
-      throw error;
+
+  @Post('flag')
+  @UseGuards(RolesGuard)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.AGENT_EY, Role.EMPLOYEE_EY)
+  async flagContent(
+    @CurrentUser() user: IUser,
+    @Body() dto: FlagContentDto,
+  ) {
+    try {
+      return await this.postsService.flagContent(user, dto);
+    } catch (error) {
+      if (error instanceof BadRequestException ||
+          error instanceof NotFoundException ||
+          error instanceof ForbiddenException) {
+        throw error;
+      }
+      
+      console.error('Erreur inattendue lors du signalement:', error);
+      throw new InternalServerErrorException('Erreur lors du signalement');
     }
-    
-    console.error('Erreur inattendue lors du signalement:', error);
-    throw new InternalServerErrorException('Erreur lors du signalement');
   }
-}
 
-@Post(':id/bookmark')
-async bookmarkPost(
-  @Param('id', ParseUUIDPipe) postId: string,
-  @CurrentUser() user: IUser, // Récupère l'user depuis le token JWT
-) {
-  return this.postsService.bookmarkPost(user, postId);
-}
+  @Post(':id/bookmark')
+  async bookmarkPost(
+    @Param('id', ParseUUIDPipe) postId: string,
+    @CurrentUser() user: IUser,
+  ) {
+    return this.postsService.bookmarkPost(user, postId);
+  }
 
-@Delete(':id/bookmark')
-async unbookmarkPost(
-  @Param('id', ParseUUIDPipe) postId: string,
-  @CurrentUser() user: IUser, // Récupère l'user depuis le token JWT
-) {
-  return this.postsService.unbookmarkPost(user, postId);
-}
+  @Delete(':id/bookmark')
+  async unbookmarkPost(
+    @Param('id', ParseUUIDPipe) postId: string,
+    @CurrentUser() user: IUser,
+  ) {
+    return this.postsService.unbookmarkPost(user, postId);
+  }
+
   @Post(':id/share-external')
   async sharePostExternal(
     @Param('id', ParseUUIDPipe) postId: string,
@@ -399,7 +467,7 @@ async unbookmarkPost(
     };
   }
 
-  // ROUTES PUT
+  // =============== ROUTES PUT ===============
 
   @Put(':id')
   async updatePost(
@@ -407,6 +475,16 @@ async unbookmarkPost(
     @CurrentUser() user: IUser,
     @Body() dto: UpdatePostDto,
   ) {
+    // ✅ NOUVEAU: Validation des mentions pour les mises à jour
+    if (dto.mentions && dto.mentions.length > 0) {
+      try {
+        const validatedMentions = await this.postsService.validateMentions(user, dto.content || '', dto.mentions);
+        dto.mentions = validatedMentions.validMentions;
+      } catch (mentionError) {
+        console.error('Error validating update mentions:', mentionError);
+      }
+    }
+
     return this.postsService.updatePost(postId, user, dto);
   }
 
@@ -416,10 +494,20 @@ async unbookmarkPost(
     @CurrentUser() user: IUser,
     @Body() dto: UpdateCommentDto,
   ) {
+    // ✅ NOUVEAU: Validation des mentions pour les mises à jour de commentaires
+    if (dto.mentions && dto.mentions.length > 0) {
+      try {
+        const validatedMentions = await this.postsService.validateMentions(user, dto.content || '', dto.mentions);
+        dto.mentions = validatedMentions.validMentions;
+      } catch (mentionError) {
+        console.error('Error validating comment update mentions:', mentionError);
+      }
+    }
+
     return this.postsService.updateComment(commentId, user, dto);
   }
 
-  // ROUTES DELETE
+  // =============== ROUTES DELETE ===============
 
   @Delete(':id')
   async deletePost(

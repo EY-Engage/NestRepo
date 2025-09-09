@@ -114,9 +114,9 @@ import { PostsModule } from './social/posts/posts.module';
     // Application modules
     DatabaseModule,
     AuthModule,
+    NotificationsModule, // Charger en premier
+    PostsModule,
     AdminModule,
-    NotificationsModule,
-    PostsModule
   ],
   controllers: [],
   providers: [],

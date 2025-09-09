@@ -24,6 +24,31 @@ export class CreateCommentDto {
   @IsArray()
   @IsString({ each: true })
   attachments?: string[];
+
+  // Méthode statique pour extraire les mentions du contenu
+  static extractMentions(content: string): string[] {
+    if (!content) return [];
+    
+    // Regex plus stricte pour éviter les faux positifs
+    const mentionRegex = /@([a-zA-ZÀ-ÿ\s\-.']{2,50})(?=\s|$|@|[.,!?;:\n])/g;
+    const mentions: string[] = [];
+    let match;
+    
+    while ((match = mentionRegex.exec(content)) !== null) {
+      const mention = match[1].trim();
+      // Validation plus stricte
+      if (mention && 
+          mention.length >= 2 && 
+          mention.length <= 50 && 
+          !/^\d+$/.test(mention) && // Pas que des chiffres
+          !/^[a-f0-9-]{8,}$/i.test(mention)) { // Pas des IDs partiels
+        mentions.push(mention);
+      }
+    }
+    
+    // Retourner des mentions uniques
+    return [...new Set(mentions)];
+  }
 }
 
 export class UpdateCommentDto {

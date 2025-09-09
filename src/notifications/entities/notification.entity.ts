@@ -1,4 +1,3 @@
-// src/notifications/entities/notification.entity.ts
 import {
   Entity,
   PrimaryGeneratedColumn,
@@ -106,6 +105,9 @@ export class Notification {
   @Column({ default: false })
   isArchived: boolean;
 
+  @Column({ nullable: true })
+  archivedAt?: Date;
+
   @CreateDateColumn()
   createdAt: Date;
 
@@ -114,4 +116,20 @@ export class Notification {
 
   @Column({ nullable: true })
   expiresAt?: Date;
+
+  // Méthodes utilitaires
+  markAsRead(): void {
+    this.isRead = true;
+    this.readAt = new Date();
+  }
+
+  archive(): void {
+    this.isArchived = true;
+    this.archivedAt = new Date();
+  }
+
+  isExpired(): boolean {
+    if (!this.expiresAt) return false;
+    return new Date() > this.expiresAt;
+  }
 }

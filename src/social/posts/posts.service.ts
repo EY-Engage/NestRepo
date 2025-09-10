@@ -22,7 +22,6 @@ import { IUser } from '../../shared/interfaces/user.interface';
 import { ContentType } from '../../shared/enums/content-type.enum';
 import { ReactionType } from '../../shared/enums/reaction-type.enum';
 import { Department } from '../../shared/enums/department.enum';
-import { NotificationsService } from '../../notifications/notifications.service';
 import { Role } from 'src/shared/enums/role.enum';
 
 @Injectable()
@@ -44,7 +43,6 @@ export class PostsService {
     private readonly bookmarkRepository: Repository<Bookmark>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
-    private readonly notificationsService: NotificationsService,
   ) {}
 
   // =============== POSTS ===============
@@ -75,11 +73,6 @@ export class PostsService {
 
       const savedPost = await this.postRepository.save(post);
       this.logger.log(`✅ Post created successfully: ${savedPost.id}`);
-
-      // Envoyer des notifications pour les mentions
-      if (resolvedMentions.length > 0) {
-        await this.notifyMentionedUsers(savedPost, resolvedMentions);
-      }
 
       return this.mapToPostDto(savedPost, user);
     } catch (error) {
@@ -218,14 +211,6 @@ export class PostsService {
 
       const updatedPost = await this.postRepository.save(post);
 
-      // Notifier les nouvelles mentions
-      if (resolvedMentions && resolvedMentions.length > 0) {
-        const newMentions = resolvedMentions.filter(mention => !post.mentions?.includes(mention));
-        if (newMentions.length > 0) {
-          await this.notifyMentionedUsers(updatedPost, newMentions);
-        }
-      }
-
       return this.mapToPostDto(updatedPost, user);
     } catch (error) {
       this.logger.error(`💥 Error updating post: ${error.message}`, error.stack);
@@ -294,22 +279,6 @@ export class PostsService {
       // Incrémenter le compteur de partages du post original
       await this.postRepository.increment({ id: dto.originalPostId }, 'sharesCount', 1);
 
-      // Notifier l'auteur du post original
-      if (originalPost.authorId !== user.id) {
-        await this.notificationsService.notifyPostComment(
-          originalPost,
-          user.id,
-          user.fullName,
-          originalPost.authorId,
-          originalPost.authorName
-        );
-      }
-
-      // Notifier les mentions dans le commentaire de partage
-      if (resolvedMentions.length > 0) {
-        await this.notifyMentionedUsers(savedShare, resolvedMentions);
-      }
-
       return this.mapToPostDto(savedShare, user);
     } catch (error) {
       this.logger.error(`💥 Error sharing post: ${error.message}`, error.stack);
@@ -352,22 +321,6 @@ export class PostsService {
 
       // Incrémenter le compteur de commentaires
       await this.postRepository.increment({ id: dto.postId }, 'commentsCount', 1);
-
-      // Notifier l'auteur du post
-      if (post.authorId !== user.id) {
-        await this.notificationsService.notifyPostComment(
-          post,
-          user.id,
-          user.fullName,
-          post.authorId,
-          post.authorName
-        );
-      }
-
-      // Notifier les mentions
-      if (resolvedMentions.length > 0) {
-        await this.notifyMentionedUsersInComment(savedComment, resolvedMentions);
-      }
 
       return this.mapToCommentDto(savedComment, user);
     } catch (error) {
@@ -445,15 +398,6 @@ export class PostsService {
       });
 
       const updatedComment = await this.commentRepository.save(comment);
-
-      // Notifier les nouvelles mentions
-      if (resolvedMentions && resolvedMentions.length > 0) {
-        const newMentions = resolvedMentions.filter(mention => !comment.mentions?.includes(mention));
-        if (newMentions.length > 0) {
-          await this.notifyMentionedUsersInComment(updatedComment, newMentions);
-        }
-      }
-
       return this.mapToCommentDto(updatedComment, user);
     } catch (error) {
       this.logger.error(`💥 Error updating comment: ${error.message}`, error.stack);
@@ -1066,9 +1010,6 @@ async getTrending(user: IUser): Promise<TrendingDto> {
         });
       }
 
-      // Notifier les modérateurs
-      await this.notifyModerators(savedFlag);
-
       return { 
         success: true, 
         message: 'Contenu signalé avec succès',
@@ -1205,95 +1146,6 @@ async getTrending(user: IUser): Promise<TrendingDto> {
       return [];
     }
   }
-
-  private async notifyMentionedUsers(post: Post, mentionedUserIds: string[]) {
-    try {
-      // Filtrer les IDs valides
-      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-      const validUserIds = mentionedUserIds.filter(id => uuidRegex.test(id));
-      
-      if (validUserIds.length === 0) {
-        this.logger.warn(`⚠️ No valid user IDs found in mentions: ${mentionedUserIds.join(', ')}`);
-        return;
-      }
-
-      const mentionedUsers = await this.userRepository.find({
-        where: { id: In(validUserIds) },
-      });
-
-      for (const mentionedUser of mentionedUsers) {
-        if (mentionedUser.id !== post.authorId) {
-          await this.notificationsService.notifyPostMention(
-            post,
-            mentionedUser.id,
-            mentionedUser.fullName,
-            post.authorName
-          );
-        }
-      }
-      
-      this.logger.log(`✅ Notified ${mentionedUsers.length} mentioned users`);
-    } catch (error) {
-      this.logger.error(`💥 Error notifying mentioned users: ${error.message}`);
-    }
-  }
-
-  private async notifyMentionedUsersInComment(comment: Comment, mentionedUserIds: string[]) {
-    try {
-      // Filtrer les IDs valides
-      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-      const validUserIds = mentionedUserIds.filter(id => uuidRegex.test(id));
-      
-      if (validUserIds.length === 0) {
-        this.logger.warn(`⚠️ No valid user IDs found in comment mentions: ${mentionedUserIds.join(', ')}`);
-        return;
-      }
-
-      const mentionedUsers = await this.userRepository.find({
-        where: { id: In(validUserIds) },
-      });
-
-      for (const mentionedUser of mentionedUsers) {
-        if (mentionedUser.id !== comment.authorId) {
-          await this.notificationsService.notifyPostMention(
-            { id: comment.postId },
-            mentionedUser.id,
-            mentionedUser.fullName,
-            comment.authorName
-          );
-        }
-      }
-      
-      this.logger.log(`✅ Notified ${mentionedUsers.length} mentioned users in comment`);
-    } catch (error) {
-      this.logger.error(`💥 Error notifying mentioned users in comment: ${error.message}`);
-    }
-  }
-
-  private async notifyModerators(flag: Flag) {
-    try {
-      // Récupérer les modérateurs (Admin et AgentEY du département)
-      const moderators = await this.userRepository
-        .createQueryBuilder('user')
-        .where('user.isActive = true')
-        .andWhere(
-          '(user.roles LIKE :admin OR (user.roles LIKE :agent AND user.department = :department))',
-          {
-            admin: '%Admin%',
-            agent: '%AgentEY%',
-            department: flag.contentAuthorDepartment,
-          }
-        )
-        .getMany();
-
-      if (moderators.length > 0) {
-        await this.notificationsService.notifyContentFlagged(flag, moderators.map(m => m.id));
-      }
-    } catch (error) {
-      this.logger.error(`💥 Error notifying moderators: ${error.message}`);
-    }
-  }
-
   private async recordPostView(postId: string, user: IUser) {
     try {
       const existingView = await this.postViewRepository.findOne({

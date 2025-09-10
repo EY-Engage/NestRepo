@@ -6,33 +6,30 @@ import { PassportModule } from '@nestjs/passport';
 import { ScheduleModule } from '@nestjs/schedule';
 import { MulterModule } from '@nestjs/platform-express';
 import { HttpModule } from '@nestjs/axios';
+import { ServeStaticModule } from '@nestjs/serve-static';
 import { join } from 'path';
 import { diskStorage } from 'multer';
 
-// Configuration imports
+// Configuration
 import databaseConfig from './config/database.config';
-
-// Module imports
-import { AuthModule } from './auth/auth.module';
-import { AdminModule } from './admin/admin.module';
-
-// Shared imports
-import { DatabaseModule } from './database/database.module';
-import { ServeStaticModule } from '@nestjs/serve-static';
 import jwtConfig from './config/jwt.config';
-import { NotificationsModule } from './notifications/notifications.module';
+
+// Modules
+import { DatabaseModule } from './database/database.module';
+import { AuthModule } from './auth/auth.module';
 import { PostsModule } from './social/posts/posts.module';
+import { AdminModule } from './admin/admin.module';
 
 @Module({
   imports: [
-    // Configuration
+    // Configuration globale
     ConfigModule.forRoot({
       isGlobal: true,
-      load: [databaseConfig,jwtConfig ],
+      load: [databaseConfig, jwtConfig],
       envFilePath: ['.env.local', '.env'],
     }),
 
-    // Database
+    // Base de données
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
       useFactory: (configService: ConfigService) => ({
@@ -52,15 +49,14 @@ import { PostsModule } from './social/posts/posts.module';
       inject: [ConfigService],
     }),
 
-    // File uploads
+    // Upload de fichiers
     MulterModule.registerAsync({
       imports: [ConfigModule],
-      useFactory: async (configService: ConfigService) => ({
+      useFactory: async () => ({
         storage: diskStorage({
           destination: (req, file, cb) => {
             let uploadPath = './uploads';
             
-            // Organiser les uploads par type
             if (file.fieldname === 'images') {
               uploadPath = './uploads/images';
             } else if (file.fieldname === 'files') {
@@ -80,23 +76,13 @@ import { PostsModule } from './social/posts/posts.module';
           },
         }),
         limits: {
-          fileSize: parseInt(process.env.MAX_FILE_SIZE) || 5242880, // 5MB par défaut
-        },
-        fileFilter: (req, file, cb) => {
-          const allowedTypes = (process.env.ALLOWED_FILE_TYPES || 'jpg,jpeg,png,gif,pdf,doc,docx').split(',');
-          const fileExtension = file.originalname.split('.').pop()?.toLowerCase();
-          
-          if (allowedTypes.includes(fileExtension || '')) {
-            cb(null, true);
-          } else {
-            cb(new Error(`Type de fichier non autorisé: ${fileExtension}`), false);
-          }
+          fileSize: 5 * 1024 * 1024, // 5MB
         },
       }),
       inject: [ConfigService],
     }),
 
-    // Static files serving
+    // Fichiers statiques
     ServeStaticModule.forRoot({
       rootPath: join(__dirname, '..', 'uploads'),
       serveRoot: '/uploads',
@@ -108,17 +94,14 @@ import { PostsModule } from './social/posts/posts.module';
       maxRedirects: 3,
     }),
 
-    // Task scheduling
+    // Planification de tâches
     ScheduleModule.forRoot(),
 
-    // Application modules
+    // Modules de l'application
     DatabaseModule,
-    AuthModule,
-    NotificationsModule, // Charger en premier
+    AuthModule, // Module principal pour les notifications
     PostsModule,
     AdminModule,
   ],
-  controllers: [],
-  providers: [],
 })
 export class AppModule {}
